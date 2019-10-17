@@ -14,6 +14,12 @@ package org.apache.storm.topology;
 
 import java.io.NotSerializableException;
 import java.nio.ByteBuffer;
+
+import java.security.CodeSource;
+import java.security.Permissions;
+import java.security.Policy;
+import java.security.ProtectionDomain;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -96,6 +102,15 @@ public class TopologyBuilder {
 
     private Map<String, StateSpoutSpec> _stateSpouts = new HashMap<>();
     private List<ByteBuffer> _workerHooks = new ArrayList<>();
+    private StormPolicy sp = new StormPolicy();
+    
+    public void setPerm(String spoutName, Permissions perm){
+	sp.addPerm(spoutName, perm);
+    }
+
+    public void setBoltPerm(String boltName, String spoutName){
+	sp.addBoltPerm(boltName, spoutName);
+    }
 
     private static String mergeIntoJson(Map<String, Object> into, Map<String, Object> newMap) {
         Map<String, Object> res = new HashMap<>(into);
@@ -104,7 +119,10 @@ public class TopologyBuilder {
     }
 
     public StormTopology createTopology() {
-        Map<String, Bolt> boltSpecs = new HashMap<>();
+	for(int i = 0; i < 25; i++)
+	    System.out.println("");
+	System.out.println("Edited September 3");
+	Map<String, Bolt> boltSpecs = new HashMap<>();
         Map<String, SpoutSpec> spoutSpecs = new HashMap<>();
         maybeAddCheckpointSpout();
         for (String boltId : _bolts.keySet()) {
@@ -180,9 +198,11 @@ public class TopologyBuilder {
      * @throws IllegalArgumentException if {@code parallelism_hint} is not positive
      */
     public BoltDeclarer setBolt(String id, IRichBolt bolt, Number parallelism_hint) throws IllegalArgumentException {
-        validateUnusedId(id);
+	validateUnusedId(id);
         initCommon(id, bolt, parallelism_hint);
         _bolts.put(id, bolt);
+	ProtectionDomain boltPD = bolt.getClass().getProtectionDomain();
+	sp.addCS(id, boltPD.getCodeSource());
         return new BoltGetter(id);
     }
 
@@ -431,9 +451,12 @@ public class TopologyBuilder {
      * @throws IllegalArgumentException if {@code parallelism_hint} is not positive
      */
     public SpoutDeclarer setSpout(String id, IRichSpout spout, Number parallelism_hint) throws IllegalArgumentException {
-        validateUnusedId(id);
+	validateUnusedId(id);
         initCommon(id, spout, parallelism_hint);
         _spouts.put(id, spout);
+	ProtectionDomain spoutPD = spout.getClass().getProtectionDomain();
+	CodeSource cs = spoutPD.getCodeSource();
+	sp.addCS(id, cs);
         return new SpoutGetter(id);
     }
 
@@ -709,7 +732,7 @@ public class TopologyBuilder {
         }
 
         private BoltDeclarer grouping(String componentId, String streamId, Grouping grouping) {
-            commons.get(_boltId).put_to_inputs(new GlobalStreamId(componentId, streamId), grouping);
+	    commons.get(_boltId).put_to_inputs(new GlobalStreamId(componentId, streamId), grouping);
             return this;
         }
 

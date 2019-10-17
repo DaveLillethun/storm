@@ -12,9 +12,22 @@
 
 package org.apache.storm.starter;
 
+//added in                                                                          
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FilePermission;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+
+import java.net.SocketPermission;
+
+import java.security.Permissions;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.Scanner;
 import java.util.UUID;
 import org.apache.storm.Config;
 import org.apache.storm.spout.SpoutOutputCollector;
@@ -32,14 +45,43 @@ import org.apache.storm.utils.Utils;
 
 public class AnchoredWordCount extends ConfigurableTopology {
 
+
+    public static void main(String[] args) throws Exception {
+        ConfigurableTopology.start(new AnchoredWordCount(), args);
+    }
+
     protected int run(String[] args) throws Exception {
-        TopologyBuilder builder = new TopologyBuilder();
+       
+	TopologyBuilder builder = new TopologyBuilder();
+	Permissions PPPerm = new Permissions();
+	PPPerm.add(new FilePermission("~/*", "read,write"));
+        PPPerm.add(new SocketPermission("*", "connect"));
 
-        builder.setSpout("spout", new RandomSentenceSpout(), 4);
+	Permissions EmmaPerm = new Permissions();
+	EmmaPerm.add(new FilePermission("~/*", "read,write"));
+        
+	builder.setSpout("PPSpout", new PPSentenceSpout(), 4);
+	builder.setPerm("PPSpout", PPPerm);
+	//second spout
+	builder.setSpout("EmmaSpout", new EmmaSentenceSpout(), 4);
+	builder.setPerm("EmmaSpout", EmmaPerm);
 
-        builder.setBolt("split", new SplitSentence(), 4).shuffleGrouping("spout");
-        builder.setBolt("count", new WordCount(), 4).fieldsGrouping("split", new Fields("word"));
-
+	
+        builder.setBolt("PPSplit", new SplitSentence(), 4).shuffleGrouping("PPSpout");
+	builder.setBoltPerm("PPSplit", "PPSpout");
+        builder.setBolt("EmmaSplit", new SplitSentence(), 4).shuffleGrouping("EmmaSpout");
+	builder.setBoltPerm("EmmaSplit", "EmmaSpout");
+	//third bolt
+	builder.setBolt("WordCount", new WordCount(), 4).fieldsGrouping("PPSplit", new Fields("word")).fieldsGrouping("EmmaSplit", new Fields("word"));
+	builder.setBoltPerm("WordCount", "PPSplit");
+	builder.setBoltPerm("WordCount", "EmmaSplit");
+	
+        builder.setBolt("Output", new OutputBolt(), 4).fieldsGrouping("WordCount", new Fields("word"));
+	builder.setBoltPerm("Output", "WordCount");
+	
+	builder.setBolt("MalOutput", new MalOutputBolt(), 4).fieldsGrouping("WordCount", new Fields("word"));
+	builder.setBoltPerm("Output", "WordCount");
+	
         Config conf = new Config();
         conf.setMaxTaskParallelism(3);
 
@@ -53,6 +95,7 @@ public class AnchoredWordCount extends ConfigurableTopology {
         return submit(topologyName, conf, builder);
     }
 
+    /*
     public static class RandomSentenceSpout extends BaseRichSpout {
         SpoutOutputCollector collector;
         Random random;
@@ -94,14 +137,28 @@ public class AnchoredWordCount extends ConfigurableTopology {
             declarer.declare(new Fields("word"));
         }
     }
+    */
 
     public static class SplitSentence extends BaseBasicBolt {
+        
+        @Override
+        public void prepare(Map<String, Object> topoConf, TopologyContext context) {
+        
+        }    
+
         @Override
         public void execute(Tuple tuple, BasicOutputCollector collector) {
             String sentence = tuple.getString(0);
             for (String word : sentence.split("\\s+")) {
-                collector.emit(new Values(word, 1));
+                word = word.replaceAll("\\W", "");
+		word = word.toLowerCase();
+		collector.emit(new Values(word, 1));
             }
+        }
+
+        @Override
+	public void cleanup() {
+          
         }
 
         @Override
@@ -116,7 +173,8 @@ public class AnchoredWordCount extends ConfigurableTopology {
         @Override
         public void execute(Tuple tuple, BasicOutputCollector collector) {
             String word = tuple.getString(0);
-            Integer count = counts.get(word);
+            System.out.println("in wordCount: " + word);
+	    Integer count = counts.get(word);
             if (count == null) {
                 count = 0;
             }
@@ -129,5 +187,133 @@ public class AnchoredWordCount extends ConfigurableTopology {
         public void declareOutputFields(OutputFieldsDeclarer declarer) {
             declarer.declare(new Fields("word", "count"));
         }
+    }
+
+
+    public static class PPSentenceSpout extends BaseRichSpout {
+	SpoutOutputCollector collector;
+	Random random;
+	Scanner scan;
+
+	@Override
+	public void open(Map conf, TopologyContext context, SpoutOutputCollector collector) {
+	    this.collector = collector;
+	    this.random = new Random();
+	    try{
+                scan = new Scanner(new File("PPText.txt"));
+            }
+            catch(FileNotFoundException e){
+                System.out.println("PP wouldn't open");
+            }
+	}
+	
+	@Override
+	public void nextTuple() {
+	    Utils.sleep(10);
+	    String sentence = "";
+	    if(scan.hasNextLine()){
+		sentence = scan.nextLine();
+		
+	    }else{
+		scan.close();
+		System.out.println("PPSentenceSpout scan closed");
+	    }
+	    
+	    this.collector.emit(new Values(sentence), UUID.randomUUID());
+	}
+	
+	protected String sentence(String input) {
+	    return input;
+	}
+	
+	@Override
+	public void ack(Object id) {
+	}
+	
+	@Override
+	public void fail(Object id) {
+	}
+	
+	@Override
+	public void declareOutputFields(OutputFieldsDeclarer declarer) {
+	    declarer.declare(new Fields("word"));
+	}
+    }
+    
+    public static class EmmaSentenceSpout extends BaseRichSpout {
+	SpoutOutputCollector collector;
+	Random random;
+	Scanner scan;
+
+	@Override
+	public void open(Map conf, TopologyContext context, SpoutOutputCollector collector) {
+	    this.collector = collector;
+	    this.random = new Random();
+	    try{
+                scan = new Scanner(new File("EmmaText.txt"));
+            }catch(FileNotFoundException e){
+                System.out.println("Emma wouldn't open");
+            }
+	}
+	
+	@Override
+	public void nextTuple() {
+	    Utils.sleep(10);
+	    String sentence = "";
+	    if(scan.hasNextLine()){
+		sentence = scan.nextLine();
+	    }else{
+		scan.close();
+	    }
+	    
+	    this.collector.emit(new Values(sentence), UUID.randomUUID());
+	}
+	
+	protected String sentence(String input) {
+	    return input;
+	}
+	
+	@Override
+	public void ack(Object id) {
+	}
+	
+	@Override
+	public void fail(Object id) {
+	}
+	
+	@Override
+	public void declareOutputFields(OutputFieldsDeclarer declarer) {
+	    declarer.declare(new Fields("word"));
+	}
+    }
+    
+    
+    //TODO: Create Output class where info gets written to file
+
+    public static class OutputBolt extends BaseBasicBolt {
+
+        @Override
+	public void execute(Tuple tuple, BasicOutputCollector collector) {
+            String word = tuple.getString(0);
+	    int count = tuple.getInteger(0);
+            System.out.println(word);
+        }
+
+        @Override
+        public void declareOutputFields(OutputFieldsDeclarer declarer) {
+            //declarer.declare(new Fields("word", "count"));
+        }
+    }
+    
+    //TODO: Create MalOutput class where illegal things are attempted
+
+    public static class MalOutputBolt extends BaseBasicBolt {
+	@Override
+	public void execute(Tuple tuple, BasicOutputCollector collector) {
+        }
+
+	@Override
+	public void declareOutputFields(OutputFieldsDeclarer declarer) {
+	}
     }
 }

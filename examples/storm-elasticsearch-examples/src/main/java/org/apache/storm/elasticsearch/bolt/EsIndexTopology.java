@@ -68,19 +68,34 @@ public final class EsIndexTopology {
      * @throws InvalidTopologyException if the topology is invalid
      * @throws AuthorizationException if the topology authorization fails
      */
+
+    //editing. An original version with clear added in spots can be found in 
+    //SummerResearch folder
     public static void main(final String[] args) throws AlreadyAliveException,
             InvalidTopologyException,
             AuthorizationException {
+        /*if (System.getSecurityManager() != null) {
+            throw new Error("Security manager is already set");
+        }
+        //        Policy.setPolicy(new SandboxSecurityPolicy());
+        System.setSecurityManager(new SecurityManager());
+        */
         Config config = new Config();
         config.setNumWorkers(1);
         TopologyBuilder builder = new TopologyBuilder();
         UserDataSpout spout = new UserDataSpout();
         builder.setSpout(SPOUT_ID, spout, 1);
+
         EsTupleMapper tupleMapper = EsTestUtil.generateDefaultTupleMapper();
         EsConfig esConfig = new EsConfig("http://localhost:9300");
-        builder.setBolt(BOLT_ID, new EsIndexBolt(esConfig, tupleMapper), 1)
-                .shuffleGrouping(SPOUT_ID);
 
+        //TODO: figure out JAR file
+        //ClassLoader esIndexLoader = new BoltClassLoader("TBD jar file");
+        //Class<?> esIndexClass = esIndexLoader.loadClass("EsIndex");
+        //EsIndexBolt esIndexBolt = (EsIndexBolt) esIndexClass.newInstance(esCOnfig, tupleMapper);
+        //builder.setBolt(BOLT_ID, new EsIndexBolt(esConfig, tupleMapper), 1)
+        //        .shuffleGrouping(SPOUT_ID);
+        builder.setBolt(BOLT_ID, new EsIndexBolt(esConfig, tupleMapper), 1).shuffleGrouping(SPOUT_ID);
         EsTestUtil.startEsNode();
         EsTestUtil.waitForSeconds(EsConstants.WAIT_DEFAULT_SECS);
         StormSubmitter.submitTopology(TOPOLOGY_NAME,
